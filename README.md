@@ -2,8 +2,7 @@
 
 A visual calendar that shows the progress of the current year through filled months and the current month's progress. Perfect for embedding in websites or dashboards to display year progression in an elegant, minimalist way.
 
-![Year Progress Calendar Example](example.png)
-*Calendar showing year progress with week divisions and green color scheme*
+<img src="example.png" width="300" alt="Year Progress Calendar Example"/>
 
 ## Description
 
