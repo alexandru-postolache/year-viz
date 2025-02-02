@@ -21,7 +21,7 @@ To embed this calendar in your website, include the following HTML:
 
 ```html
 <iframe
-src="https://path-to-your-calendar/index.html"
+src="https://alexandru-postolache.github.io/year-viz/?showUI=false"
 width="600"
 height="600"
 frameborder="0">
