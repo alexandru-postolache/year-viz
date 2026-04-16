@@ -44,12 +44,22 @@ const VIEW_NAV = {
   minZoom: 0.5,
   maxZoom: 4,
   /** At least this many pixels of the calendar must stay on-screen along each axis. */
-  minVisiblePx: 48
+  minVisiblePx: 48,
+  /** Movement past this (px) cancels a pending preset tap so left-drag can pan. */
+  dragSlop: 5
 };
 
 let viewZoom = 1;
 let viewPan = { x: 0, y: 0 };
-let viewPanDrag = { active: false, lastX: 0, lastY: 0 };
+let viewPanDrag = {
+  active: false,
+  lastX: 0,
+  lastY: 0,
+  startX: 0,
+  startY: 0,
+  pointerButton: null,
+  presetCandidate: null
+};
 
 // Default parameters
 const DEFAULT_PARAMS = {
@@ -618,6 +628,18 @@ function createPresetButtons() {
   ];
 }
 
+function hitPresetAt(mx, my) {
+  if (!urlParams.showUI) return null;
+  for (const button of presetButtons) {
+    const centerX = button.x + BUTTON_CONFIG.diameter / 2;
+    const centerY = button.y + BUTTON_CONFIG.diameter / 2;
+    if (dist(mx, my, centerX, centerY) < BUTTON_CONFIG.diameter / 2) {
+      return button.preset;
+    }
+  }
+  return null;
+}
+
 function drawButtons() {
   presetButtons.forEach(button => {
     push();
@@ -641,31 +663,58 @@ function drawButtons() {
 
 function mousePressed() {
   if (mouseButton === RIGHT) {
-    viewPanDrag = { active: true, lastX: mouseX, lastY: mouseY };
+    viewPanDrag = {
+      active: true,
+      lastX: mouseX,
+      lastY: mouseY,
+      startX: mouseX,
+      startY: mouseY,
+      pointerButton: RIGHT,
+      presetCandidate: null
+    };
     return false;
   }
 
-  if (!urlParams.showUI || mouseButton !== LEFT) return;
-
-  presetButtons.forEach((button) => {
-    const centerX = button.x + BUTTON_CONFIG.diameter / 2;
-    const centerY = button.y + BUTTON_CONFIG.diameter / 2;
-    const distance = dist(mouseX, mouseY, centerX, centerY);
-
-    if (distance < BUTTON_CONFIG.diameter / 2) {
-      applyPreset(button.preset);
-    }
-  });
+  if (mouseButton === LEFT) {
+    viewPanDrag = {
+      active: true,
+      lastX: mouseX,
+      lastY: mouseY,
+      startX: mouseX,
+      startY: mouseY,
+      pointerButton: LEFT,
+      presetCandidate: hitPresetAt(mouseX, mouseY)
+    };
+  }
 }
 
 function mouseReleased() {
-  if (viewPanDrag.active && mouseButton === RIGHT) {
-    viewPanDrag.active = false;
+  if (!viewPanDrag.active || mouseButton !== viewPanDrag.pointerButton) return;
+
+  if (
+    viewPanDrag.pointerButton === LEFT &&
+    viewPanDrag.presetCandidate &&
+    dist(mouseX, mouseY, viewPanDrag.startX, viewPanDrag.startY) <=
+      VIEW_NAV.dragSlop
+  ) {
+    applyPreset(viewPanDrag.presetCandidate);
   }
+
+  viewPanDrag.active = false;
+  viewPanDrag.presetCandidate = null;
+  viewPanDrag.pointerButton = null;
 }
 
 function mouseDragged() {
   if (!viewPanDrag.active) return;
+  if (
+    viewPanDrag.presetCandidate &&
+    viewPanDrag.pointerButton === LEFT &&
+    dist(mouseX, mouseY, viewPanDrag.startX, viewPanDrag.startY) >
+      VIEW_NAV.dragSlop
+  ) {
+    viewPanDrag.presetCandidate = null;
+  }
   viewPan.x += mouseX - viewPanDrag.lastX;
   viewPan.y += mouseY - viewPanDrag.lastY;
   viewPanDrag.lastX = mouseX;
