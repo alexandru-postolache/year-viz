@@ -98,12 +98,39 @@ function preload() {
   logo = loadImage('logo-horizontal.png');
 }
 
+function parseHexColorParam(raw) {
+  if (raw == null || raw === '') return null;
+  let h = String(raw).trim().replace(/^#/, '');
+  if (h.length === 3) {
+    h = h
+      .split('')
+      .map((c) => c + c)
+      .join('');
+  }
+  if (!/^[0-9a-fA-F]{6}$/.test(h)) return null;
+  return {
+    r: parseInt(h.slice(0, 2), 16),
+    g: parseInt(h.slice(2, 4), 16),
+    b: parseInt(h.slice(4, 6), 16)
+  };
+}
+
 function getUrlParams() {
   const search = new URLSearchParams(window.location.search);
   const colorParam = search.get('color')?.toLowerCase() || 'black';
   const viewParam = search.get('view')?.toLowerCase();
   const viewMode =
     viewParam === 'life' ? VIEW_MODES.LIFE : VIEW_MODES.YEAR;
+
+  const rawSize = parseInt(search.get('size'), 10);
+  const rectangleSize = Number.isFinite(rawSize)
+    ? Math.max(100, Math.min(1000, rawSize))
+    : null;
+
+  const rawBorderW = parseInt(search.get('borderW'), 10);
+  const borderWeight = Number.isFinite(rawBorderW)
+    ? Math.max(1, Math.min(50, rawBorderW))
+    : null;
 
   return {
     color: ['black', 'blue', 'green', 'alex', 'alexcodesart'].includes(colorParam)
@@ -132,7 +159,12 @@ function getUrlParams() {
     showLifeYears:
       search.get('lifeYears') !== null
         ? search.get('lifeYears') === 'true'
-        : DEFAULT_PARAMS.showLifeYears
+        : DEFAULT_PARAMS.showLifeYears,
+    rectangleSize,
+    borderWeight,
+    customBackground: parseHexColorParam(search.get('bg')),
+    customFill: parseHexColorParam(search.get('fill')),
+    customBorder: parseHexColorParam(search.get('border'))
   };
 }
 
@@ -145,6 +177,111 @@ const COLOR_PARAM_TO_PRESET = {
   alexcodesart: 'alexcodesart'
 };
 
+const PRESET_TO_COLOR_PARAM = {
+  monochrome: 'black',
+  blue: 'blue',
+  green: 'green',
+  alexcodesart: 'alexcodesart'
+};
+
+const URL_SYNC_PARAM_KEYS = [
+  'color',
+  'showUI',
+  'showWeeks',
+  'showDays',
+  'view',
+  'birth',
+  'expectancy',
+  'lifeMonths',
+  'lifeYears',
+  'size',
+  'borderW',
+  'bg',
+  'fill',
+  'border'
+];
+
+function rgbEqual(a, b) {
+  return a.r === b.r && a.g === b.g && a.b === b.b;
+}
+
+function rgbToHexParam({ r, g, b }) {
+  const byte = (n) =>
+    Math.max(0, Math.min(255, Math.round(n)))
+      .toString(16)
+      .padStart(2, '0');
+  return `${byte(r)}${byte(g)}${byte(b)}`;
+}
+
+function findMatchingPresetKey() {
+  for (const key of Object.keys(COLOR_PRESETS)) {
+    const preset = COLOR_PRESETS[key];
+    if (
+      rgbEqual(params.backgroundColor, preset.backgroundColor) &&
+      rgbEqual(params.fillColor, preset.fillColor) &&
+      rgbEqual(params.borderColor, preset.borderColor)
+    ) {
+      return key;
+    }
+  }
+  return null;
+}
+
+function syncUrlFromParams() {
+  const sp = new URLSearchParams(window.location.search);
+  for (const k of URL_SYNC_PARAM_KEYS) {
+    sp.delete(k);
+  }
+
+  const presetKey = findMatchingPresetKey();
+  if (presetKey) {
+    sp.set('color', PRESET_TO_COLOR_PARAM[presetKey]);
+  } else {
+    sp.set('bg', rgbToHexParam(params.backgroundColor));
+    sp.set('fill', rgbToHexParam(params.fillColor));
+    sp.set('border', rgbToHexParam(params.borderColor));
+  }
+
+  if (params.rectangleSize !== DEFAULT_PARAMS.rectangleSize) {
+    sp.set('size', String(params.rectangleSize));
+  }
+  if (params.borderWeight !== DEFAULT_PARAMS.borderWeight) {
+    sp.set('borderW', String(params.borderWeight));
+  }
+
+  if (!urlParams.showUI) {
+    sp.set('showUI', 'false');
+  }
+
+  if (!params.showWeeks) {
+    sp.set('showWeeks', 'false');
+  }
+  if (params.showDays) {
+    sp.set('showDays', 'true');
+  }
+
+  if (params.viewMode === VIEW_MODES.LIFE) {
+    sp.set('view', 'life');
+  }
+
+  if (params.birthDate !== DEFAULT_PARAMS.birthDate) {
+    sp.set('birth', params.birthDate);
+  }
+  if (params.lifeExpectancyYears !== DEFAULT_PARAMS.lifeExpectancyYears) {
+    sp.set('expectancy', String(params.lifeExpectancyYears));
+  }
+  if (!params.showLifeMonths) {
+    sp.set('lifeMonths', 'false');
+  }
+  if (params.showLifeYears) {
+    sp.set('lifeYears', 'true');
+  }
+
+  const qs = sp.toString();
+  const next = `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`;
+  window.history.replaceState(null, '', next);
+}
+
 // Add this right after params initialization
 const urlParams = getUrlParams();
 
@@ -155,7 +292,23 @@ function setup() {
 
   // Apply initial color preset
   applyPreset(COLOR_PARAM_TO_PRESET[urlParams.color]);
-  
+
+  if (urlParams.customBackground) {
+    params.backgroundColor = { ...urlParams.customBackground };
+  }
+  if (urlParams.customFill) {
+    params.fillColor = { ...urlParams.customFill };
+  }
+  if (urlParams.customBorder) {
+    params.borderColor = { ...urlParams.customBorder };
+  }
+  if (urlParams.rectangleSize != null) {
+    params.rectangleSize = urlParams.rectangleSize;
+  }
+  if (urlParams.borderWeight != null) {
+    params.borderWeight = urlParams.borderWeight;
+  }
+
   // Apply URL parameters for weeks and days
   params.showWeeks = urlParams.showWeeks;
   params.showDays = urlParams.showDays;
@@ -580,6 +733,7 @@ function setupGui() {
   viewTab.on("select", (ev) => {
     params.viewMode =
       ev.index === 0 ? VIEW_MODES.YEAR : VIEW_MODES.LIFE;
+    syncUrlFromParams();
   });
 
   const lifePageIndex = params.viewMode === VIEW_MODES.LIFE ? 1 : 0;
@@ -589,6 +743,10 @@ function setupGui() {
   colorsFolder.addInput(params, "backgroundColor", { label: 'Background Color' });
   colorsFolder.addInput(params, "fillColor", { label: 'Fill Color' });
   colorsFolder.addInput(params, "borderColor", { label: 'Border Color' });
+
+  pane.on("change", () => {
+    syncUrlFromParams();
+  });
 }
 
 // Add these new functions
@@ -698,6 +856,7 @@ function mouseReleased() {
       VIEW_NAV.dragSlop
   ) {
     applyPreset(viewPanDrag.presetCandidate);
+    syncUrlFromParams();
   }
 
   viewPanDrag.active = false;
