@@ -12,19 +12,25 @@ const DATE_LABEL_CONFIG = {
 // Add this after the existing constants
 const COLOR_PRESETS = {
   monochrome: {
-    backgroundColor: { r: 240, g: 240, b: 240 },
-    fillColor: { r: 40, g: 40, b: 40 },
-    borderColor: { r: 80, g: 80, b: 80 }
+    backgroundColor: { r: 247, g: 245, b: 242 },
+    fillColor: { r: 28, g: 28, b: 32 },
+    borderColor: { r: 118, g: 116, b: 112 }
   },
   blue: {
-    backgroundColor: { r: 235, g: 245, b: 255 },
-    fillColor: { r: 41, g: 98, b: 255 },
-    borderColor: { r: 0, g: 71, b: 171 }
+    backgroundColor: { r: 236, g: 243, b: 250 },
+    fillColor: { r: 52, g: 98, b: 168 },
+    borderColor: { r: 34, g: 72, b: 124 }
   },
   green: {
-    backgroundColor: { r: 236, g: 255, b: 244 },
-    fillColor: { r: 34, g: 161, b: 98 },
-    borderColor: { r: 21, g: 115, b: 71 }
+    backgroundColor: { r: 241, g: 249, b: 244 },
+    fillColor: { r: 30, g: 122, b: 95 },
+    borderColor: { r: 22, g: 88, b: 68 }
+  },
+  // alexcodesart: primary #ffba06, secondary #40476d
+  alexcodesart: {
+    backgroundColor: { r: 255, g: 252, b: 243 },
+    fillColor: { r: 255, g: 186, b: 6 },
+    borderColor: { r: 64, g: 71, b: 109 }
   }
 };
 
@@ -78,7 +84,9 @@ function getUrlParams() {
     viewParam === 'life' ? VIEW_MODES.LIFE : VIEW_MODES.YEAR;
 
   return {
-    color: ['black', 'blue', 'green'].includes(colorParam) ? colorParam : 'black',
+    color: ['black', 'blue', 'green', 'alex', 'alexcodesart'].includes(colorParam)
+      ? colorParam
+      : 'black',
     showUI: search.get('showUI') !== 'false',
     showWeeks:
       search.get('showWeeks') !== null
@@ -108,9 +116,11 @@ function getUrlParams() {
 
 // Map color param names to preset names
 const COLOR_PARAM_TO_PRESET = {
-  'black': 'monochrome',
-  'blue': 'blue',
-  'green': 'green'
+  black: 'monochrome',
+  blue: 'blue',
+  green: 'green',
+  alex: 'alexcodesart',
+  alexcodesart: 'alexcodesart'
 };
 
 // Add this right after params initialization
@@ -493,10 +503,12 @@ function setupGui() {
 
 // Add these new functions
 function createPresetButtons() {
-  const totalWidth = (BUTTON_CONFIG.diameter * 3) + (BUTTON_CONFIG.gap * 2);
-  const startX = width/2 - totalWidth/2;
+  const n = 4;
+  const totalWidth =
+    BUTTON_CONFIG.diameter * n + BUTTON_CONFIG.gap * (n - 1);
+  const startX = width / 2 - totalWidth / 2;
   // Calculate y position relative to calendar bottom
-  const y = (height/2 + params.rectangleSize/2) + BUTTON_CONFIG.yOffset;
+  const y = height / 2 + params.rectangleSize / 2 + BUTTON_CONFIG.yOffset;
 
   presetButtons = [
     {
@@ -516,6 +528,12 @@ function createPresetButtons() {
       y,
       preset: 'green',
       color: COLOR_PRESETS.green.fillColor
+    },
+    {
+      x: startX + (BUTTON_CONFIG.diameter + BUTTON_CONFIG.gap) * 3,
+      y,
+      preset: 'alexcodesart',
+      color: COLOR_PRESETS.alexcodesart.fillColor
     }
   ];
 }
