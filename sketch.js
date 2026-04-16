@@ -39,6 +39,28 @@ const VIEW_MODES = {
   LIFE: 'life'
 };
 
+// Zoom / pan: calendar is transformed; preset buttons and logo stay fixed.
+const VIEW_NAV = {
+  minZoom: 0.5,
+  maxZoom: 4,
+  /** At least this many pixels of the calendar must stay on-screen along each axis. */
+  minVisiblePx: 48,
+  /** Movement past this (px) cancels a pending preset tap so left-drag can pan. */
+  dragSlop: 5
+};
+
+let viewZoom = 1;
+let viewPan = { x: 0, y: 0 };
+let viewPanDrag = {
+  active: false,
+  lastX: 0,
+  lastY: 0,
+  startX: 0,
+  startY: 0,
+  pointerButton: null,
+  presetCandidate: null
+};
+
 // Default parameters
 const DEFAULT_PARAMS = {
   rectangleSize: 400,
@@ -127,9 +149,10 @@ const COLOR_PARAM_TO_PRESET = {
 const urlParams = getUrlParams();
 
 function setup() {
-  createCanvas(CANVAS_SIZE.width, CANVAS_SIZE.height);
+  const cnv = createCanvas(CANVAS_SIZE.width, CANVAS_SIZE.height);
   pixelDensity(3);
-  
+  cnv.elt.addEventListener('contextmenu', (e) => e.preventDefault());
+
   // Apply initial color preset
   applyPreset(COLOR_PARAM_TO_PRESET[urlParams.color]);
   
@@ -146,9 +169,12 @@ function setup() {
     setupGui();
     createPresetButtons();
   }
+
+  resetViewTransform();
 }
 
 function draw() {
+  clampViewPan();
   background(255);
   drawMainCalendar();
   
@@ -163,11 +189,70 @@ function apply2DTransformations() {
   translate(-width / 2, -height / 2);
 }
 
-function drawMainCalendar() {
-  const calendarPosition = {
-    x: width / 2 - params.rectangleSize / 2,
-    y: height / 2 - params.rectangleSize / 2
+function getCalendarLayoutRect() {
+  const w = params.rectangleSize;
+  return {
+    x: width / 2 - w / 2,
+    y: height / 2 - w / 2,
+    w,
+    h: w
   };
+}
+
+/** Screen = center + pan + (layout - center) * zoom, with center = (width/2, height/2). */
+function applyViewTransform() {
+  const cx = width / 2;
+  const cy = height / 2;
+  translate(cx + viewPan.x, cy + viewPan.y);
+  scale(viewZoom);
+  translate(-cx, -cy);
+}
+
+function clampViewPan() {
+  const { w, h } = getCalendarLayoutRect();
+  const cx = width / 2;
+  const cy = height / 2;
+  const m = VIEW_NAV.minVisiblePx;
+  const halfW = (w * viewZoom) / 2;
+  const halfH = (h * viewZoom) / 2;
+
+  const minPanX = m - cx - halfW;
+  const maxPanX = width - m - cx + halfW;
+  const minPanY = m - cy - halfH;
+  const maxPanY = height - m - cy + halfH;
+
+  if (minPanX > maxPanX) {
+    viewPan.x = (minPanX + maxPanX) / 2;
+  } else {
+    viewPan.x = Math.min(maxPanX, Math.max(minPanX, viewPan.x));
+  }
+  if (minPanY > maxPanY) {
+    viewPan.y = (minPanY + maxPanY) / 2;
+  } else {
+    viewPan.y = Math.min(maxPanY, Math.max(minPanY, viewPan.y));
+  }
+}
+
+function resetViewTransform() {
+  viewZoom = 1;
+  viewPan = { x: 0, y: 0 };
+  clampViewPan();
+}
+
+function layoutPointFromScreen(sx, sy) {
+  const cx = width / 2;
+  const cy = height / 2;
+  return {
+    x: cx + (sx - cx - viewPan.x) / viewZoom,
+    y: cy + (sy - cy - viewPan.y) / viewZoom
+  };
+}
+
+function drawMainCalendar() {
+  const calendarPosition = getCalendarLayoutRect();
+
+  push();
+  applyViewTransform();
 
   // Draw background rectangle
   drawBackgroundRectangle(calendarPosition);
@@ -178,18 +263,20 @@ function drawMainCalendar() {
       now,
       calendarPosition.x,
       calendarPosition.y,
-      params.rectangleSize,
-      params.rectangleSize
+      calendarPosition.w,
+      calendarPosition.h
     );
   } else {
     drawMonths(
       now,
       calendarPosition.x,
       calendarPosition.y,
-      params.rectangleSize,
-      params.rectangleSize
+      calendarPosition.w,
+      calendarPosition.h
     );
   }
+
+  pop();
 }
 
 function drawBackgroundRectangle({ x, y }) {
@@ -469,6 +556,9 @@ function setupGui() {
 
   const generalFolder = pane.addFolder({ title: "General" });
   generalFolder.addInput(params, "rectangleSize", { min: 100, max: 1000, step: 1 });
+  generalFolder.addButton({ title: "Reset zoom / pan" }).on("click", () => {
+    resetViewTransform();
+  });
 
   const viewTab = pane.addTab({
     pages: [{ title: "Year" }, { title: "Your life" }]
@@ -538,6 +628,18 @@ function createPresetButtons() {
   ];
 }
 
+function hitPresetAt(mx, my) {
+  if (!urlParams.showUI) return null;
+  for (const button of presetButtons) {
+    const centerX = button.x + BUTTON_CONFIG.diameter / 2;
+    const centerY = button.y + BUTTON_CONFIG.diameter / 2;
+    if (dist(mx, my, centerX, centerY) < BUTTON_CONFIG.diameter / 2) {
+      return button.preset;
+    }
+  }
+  return null;
+}
+
 function drawButtons() {
   presetButtons.forEach(button => {
     push();
@@ -560,17 +662,85 @@ function drawButtons() {
 }
 
 function mousePressed() {
-  if (!urlParams.showUI) return;
-  
-  presetButtons.forEach(button => {
-    const centerX = button.x + BUTTON_CONFIG.diameter/2;
-    const centerY = button.y + BUTTON_CONFIG.diameter/2;
-    const distance = dist(mouseX, mouseY, centerX, centerY);
-    
-    if (distance < BUTTON_CONFIG.diameter/2) {
-      applyPreset(button.preset);
-    }
-  });
+  if (mouseButton === RIGHT) {
+    viewPanDrag = {
+      active: true,
+      lastX: mouseX,
+      lastY: mouseY,
+      startX: mouseX,
+      startY: mouseY,
+      pointerButton: RIGHT,
+      presetCandidate: null
+    };
+    return false;
+  }
+
+  if (mouseButton === LEFT) {
+    viewPanDrag = {
+      active: true,
+      lastX: mouseX,
+      lastY: mouseY,
+      startX: mouseX,
+      startY: mouseY,
+      pointerButton: LEFT,
+      presetCandidate: hitPresetAt(mouseX, mouseY)
+    };
+  }
+}
+
+function mouseReleased() {
+  if (!viewPanDrag.active || mouseButton !== viewPanDrag.pointerButton) return;
+
+  if (
+    viewPanDrag.pointerButton === LEFT &&
+    viewPanDrag.presetCandidate &&
+    dist(mouseX, mouseY, viewPanDrag.startX, viewPanDrag.startY) <=
+      VIEW_NAV.dragSlop
+  ) {
+    applyPreset(viewPanDrag.presetCandidate);
+  }
+
+  viewPanDrag.active = false;
+  viewPanDrag.presetCandidate = null;
+  viewPanDrag.pointerButton = null;
+}
+
+function mouseDragged() {
+  if (!viewPanDrag.active) return;
+  if (
+    viewPanDrag.presetCandidate &&
+    viewPanDrag.pointerButton === LEFT &&
+    dist(mouseX, mouseY, viewPanDrag.startX, viewPanDrag.startY) >
+      VIEW_NAV.dragSlop
+  ) {
+    viewPanDrag.presetCandidate = null;
+  }
+  viewPan.x += mouseX - viewPanDrag.lastX;
+  viewPan.y += mouseY - viewPanDrag.lastY;
+  viewPanDrag.lastX = mouseX;
+  viewPanDrag.lastY = mouseY;
+  clampViewPan();
+}
+
+function mouseWheel(event) {
+  const dy = typeof event.deltaY === "number" ? event.deltaY : event.delta;
+  const direction = dy > 0 ? -1 : 1;
+  const factor = direction > 0 ? 1.08 : 1 / 1.08;
+  const newZoom = constrain(
+    viewZoom * factor,
+    VIEW_NAV.minZoom,
+    VIEW_NAV.maxZoom
+  );
+  if (newZoom === viewZoom) return false;
+
+  const layout = layoutPointFromScreen(mouseX, mouseY);
+  viewZoom = newZoom;
+  const cx = width / 2;
+  const cy = height / 2;
+  viewPan.x = mouseX - cx - (layout.x - cx) * viewZoom;
+  viewPan.y = mouseY - cy - (layout.y - cy) * viewZoom;
+  clampViewPan();
+  return false;
 }
 
 function applyPreset(presetName) {
