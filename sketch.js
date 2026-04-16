@@ -28,6 +28,11 @@ const COLOR_PRESETS = {
   }
 };
 
+const VIEW_MODES = {
+  YEAR: 'year',
+  LIFE: 'life'
+};
+
 // Default parameters
 const DEFAULT_PARAMS = {
   rectangleSize: 400,
@@ -36,7 +41,10 @@ const DEFAULT_PARAMS = {
   borderWeight: 1,
   backgroundColor: { r: 255, g: 255, b: 255 },
   showWeeks: true,
-  showDays: false
+  showDays: false,
+  viewMode: VIEW_MODES.YEAR,
+  birthDate: '1990-01-01',
+  lifeExpectancyYears: 80
 };
 
 let logo;
@@ -61,14 +69,30 @@ function preload() {
 }
 
 function getUrlParams() {
-  const params = new URLSearchParams(window.location.search);
-  const colorParam = params.get('color')?.toLowerCase() || 'black';
-  
+  const search = new URLSearchParams(window.location.search);
+  const colorParam = search.get('color')?.toLowerCase() || 'black';
+  const viewParam = search.get('view')?.toLowerCase();
+  const viewMode =
+    viewParam === 'life' ? VIEW_MODES.LIFE : VIEW_MODES.YEAR;
+
   return {
     color: ['black', 'blue', 'green'].includes(colorParam) ? colorParam : 'black',
-    showUI: params.get('showUI') !== 'false',
-    showWeeks: params.get('showWeeks') !== null ? params.get('showWeeks') === 'true' : DEFAULT_PARAMS.showWeeks,
-    showDays: params.get('showDays') !== null ? params.get('showDays') === 'true' : DEFAULT_PARAMS.showDays
+    showUI: search.get('showUI') !== 'false',
+    showWeeks:
+      search.get('showWeeks') !== null
+        ? search.get('showWeeks') === 'true'
+        : DEFAULT_PARAMS.showWeeks,
+    showDays:
+      search.get('showDays') !== null
+        ? search.get('showDays') === 'true'
+        : DEFAULT_PARAMS.showDays,
+    viewMode,
+    birthDate: search.get('birth') || DEFAULT_PARAMS.birthDate,
+    lifeExpectancyYears: (() => {
+      const raw = parseInt(search.get('expectancy'), 10);
+      const n = Number.isFinite(raw) ? raw : DEFAULT_PARAMS.lifeExpectancyYears;
+      return Math.max(1, Math.min(200, n));
+    })()
   };
 }
 
@@ -92,7 +116,10 @@ function setup() {
   // Apply URL parameters for weeks and days
   params.showWeeks = urlParams.showWeeks;
   params.showDays = urlParams.showDays;
-  
+  params.viewMode = urlParams.viewMode;
+  params.birthDate = urlParams.birthDate;
+  params.lifeExpectancyYears = urlParams.lifeExpectancyYears;
+
   if (urlParams.showUI) {
     setupGui();
     createPresetButtons();
@@ -122,10 +149,25 @@ function drawMainCalendar() {
 
   // Draw background rectangle
   drawBackgroundRectangle(calendarPosition);
-  
-  // Draw calendar
-  drawMonths(new Date(), calendarPosition.x, calendarPosition.y, 
-             params.rectangleSize, params.rectangleSize);
+
+  const now = new Date();
+  if (params.viewMode === VIEW_MODES.LIFE) {
+    drawLifeVisualization(
+      now,
+      calendarPosition.x,
+      calendarPosition.y,
+      params.rectangleSize,
+      params.rectangleSize
+    );
+  } else {
+    drawMonths(
+      now,
+      calendarPosition.x,
+      calendarPosition.y,
+      params.rectangleSize,
+      params.rectangleSize
+    );
+  }
 }
 
 function drawBackgroundRectangle({ x, y }) {
@@ -242,13 +284,180 @@ function getDaysInThisMonth(date) {
   return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
 }
 
+function parseBirthDate(str) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(str).trim());
+  if (!m) return null;
+  const y = parseInt(m[1], 10);
+  const mo = parseInt(m[2], 10) - 1;
+  const d = parseInt(m[3], 10);
+  const dt = new Date(y, mo, d);
+  if (dt.getFullYear() !== y || dt.getMonth() !== mo || dt.getDate() !== d) {
+    return null;
+  }
+  return dt;
+}
+
+function addCalendarYears(date, years) {
+  const out = new Date(date.getTime());
+  out.setFullYear(out.getFullYear() + years);
+  return out;
+}
+
+function getLifeSpanBounds(birth, expectancyYears) {
+  const death = addCalendarYears(birth, expectancyYears);
+  return { birth, death, spanMs: Math.max(1, death.getTime() - birth.getTime()) };
+}
+
+function getElapsedLifeFraction(now, birth, spanMs) {
+  const elapsed = now.getTime() - birth.getTime();
+  return Math.min(1, Math.max(0, elapsed / spanMs));
+}
+
+function countDaysInRange(start, end) {
+  const startDay = new Date(
+    start.getFullYear(),
+    start.getMonth(),
+    start.getDate()
+  ).getTime();
+  const endDay = new Date(
+    end.getFullYear(),
+    end.getMonth(),
+    end.getDate()
+  ).getTime();
+  return Math.max(1, Math.round((endDay - startDay) / 86400000));
+}
+
+function drawLifeVisualization(now, x, y, w, h) {
+  const birth = parseBirthDate(params.birthDate);
+  if (!birth) {
+    push();
+    noStroke();
+    fill(180, 60, 60);
+    textAlign(CENTER, CENTER);
+    textSize(14);
+    text('Invalid birth date (use YYYY-MM-DD)', x + w / 2, y + h / 2);
+    pop();
+    return;
+  }
+
+  const { death, spanMs } = getLifeSpanBounds(birth, params.lifeExpectancyYears);
+  const frac = getElapsedLifeFraction(now, birth, spanMs);
+  const twelfthWidth = w / 12;
+
+  setStrokeStyle();
+
+  drawMonthRectangles(x, y, twelfthWidth, h);
+
+  push();
+  drawFilledLifeTwelfths(x, y, twelfthWidth, h, frac);
+  drawLifeTwelfthDivisions(now, birth, death, x, y, twelfthWidth, h);
+  drawLifeLabel(frac, x + w / 2, y - DATE_LABEL_CONFIG.yOffset);
+  pop();
+}
+
+function drawFilledLifeTwelfths(x, y, twelfthWidth, h, frac) {
+  const twelfths = frac * 12;
+  const fullCols = Math.min(12, Math.floor(twelfths));
+  const partial = twelfths - fullCols;
+
+  fill(params.fillColor.r, params.fillColor.g, params.fillColor.b);
+  for (let i = 0; i < fullCols; i++) {
+    rect(x + twelfthWidth * i, y, twelfthWidth, h);
+  }
+  if (fullCols < 12 && partial > 0) {
+    const colX = x + twelfthWidth * fullCols;
+    const colH = h * partial;
+    rect(colX, y + h - colH, twelfthWidth, colH);
+  }
+}
+
+function drawLifeTwelfthDivisions(now, birth, death, x, y, twelfthWidth, h) {
+  for (let i = 0; i < 12; i++) {
+    const segStart = new Date(
+      birth.getTime() + (i / 12) * (death.getTime() - birth.getTime())
+    );
+    const segEnd = new Date(
+      birth.getTime() + ((i + 1) / 12) * (death.getTime() - birth.getTime())
+    );
+    if (params.showWeeks) {
+      drawLifeWeekDivisions(segStart, segEnd, x + twelfthWidth * i, y, twelfthWidth, h);
+    }
+    if (params.showDays) {
+      drawLifeDayDivisions(segStart, segEnd, x + twelfthWidth * i, y, twelfthWidth, h);
+    }
+  }
+}
+
+function drawLifeWeekDivisions(segStart, segEnd, monthX, y, monthWidth, h) {
+  strokeWeight(params.showDays ? params.borderWeight + 1 : params.borderWeight);
+  const span = segEnd.getTime() - segStart.getTime();
+  if (span <= 0) return;
+
+  const d = new Date(segStart);
+  d.setHours(0, 0, 0, 0);
+  while (d < segEnd) {
+    if (d > segStart && d.getDay() === 0) {
+      const t = (d.getTime() - segStart.getTime()) / span;
+      const weekY = y + h * t;
+      line(monthX, weekY, monthX + monthWidth, weekY);
+    }
+    d.setDate(d.getDate() + 1);
+  }
+}
+
+function drawLifeDayDivisions(segStart, segEnd, monthX, y, monthWidth, h) {
+  strokeWeight(params.borderWeight);
+  const span = segEnd.getTime() - segStart.getTime();
+  if (span <= 0) return;
+
+  const totalDays = countDaysInRange(segStart, segEnd);
+  for (let day = 1; day < totalDays; day++) {
+    const dayY = y + (h / totalDays) * day;
+    line(monthX, dayY, monthX + monthWidth, dayY);
+  }
+}
+
+function drawLifeLabel(frac, cx, labelY) {
+  push();
+  strokeWeight(1);
+  textAlign(CENTER);
+  textSize(DATE_LABEL_CONFIG.fontSize);
+  fill(params.fillColor.r, params.fillColor.g, params.fillColor.b);
+
+  const totalY = params.lifeExpectancyYears;
+  const livedYears = frac * totalY;
+  const leftYears = totalY - livedYears;
+  const pct = Math.round(frac * 100);
+
+  const livedStr =
+    livedYears >= 10 ? livedYears.toFixed(1) : livedYears.toFixed(2);
+  const leftStr =
+    Math.abs(leftYears) >= 10 ? leftYears.toFixed(1) : leftYears.toFixed(2);
+
+  text(`${pct}% lived · ${livedStr} / ${totalY} yr · ${leftStr} yr left`, cx, labelY);
+  pop();
+}
+
 function setupGui() {
   const pane = new Tweakpane.Pane();
-  
+
   const generalFolder = pane.addFolder({ title: "General" });
   generalFolder.addInput(params, "rectangleSize", { min: 100, max: 1000, step: 1 });
   generalFolder.addInput(params, "showWeeks", { label: 'Show Weeks' });
   generalFolder.addInput(params, "showDays", { label: 'Show Days' });
+
+  const lifeFolder = pane.addFolder({ title: "Your life" });
+  lifeFolder.addInput(params, "viewMode", {
+    label: "View",
+    options: { Year: VIEW_MODES.YEAR, "Your life": VIEW_MODES.LIFE }
+  });
+  lifeFolder.addInput(params, "birthDate", { label: "Birth (YYYY-MM-DD)" });
+  lifeFolder.addInput(params, "lifeExpectancyYears", {
+    label: "Lifetime (years)",
+    min: 1,
+    max: 120,
+    step: 1
+  });
   
   const colorsFolder = pane.addFolder({ title: "Colors" });
   colorsFolder.addInput(params, "backgroundColor", { label: 'Background Color' });
