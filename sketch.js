@@ -44,7 +44,9 @@ const DEFAULT_PARAMS = {
   showDays: false,
   viewMode: VIEW_MODES.YEAR,
   birthDate: '1990-01-01',
-  lifeExpectancyYears: 80
+  lifeExpectancyYears: 80,
+  showLifeMonths: true,
+  showLifeYears: false
 };
 
 let logo;
@@ -92,7 +94,15 @@ function getUrlParams() {
       const raw = parseInt(search.get('expectancy'), 10);
       const n = Number.isFinite(raw) ? raw : DEFAULT_PARAMS.lifeExpectancyYears;
       return Math.max(1, Math.min(200, n));
-    })()
+    })(),
+    showLifeMonths:
+      search.get('lifeMonths') !== null
+        ? search.get('lifeMonths') === 'true'
+        : DEFAULT_PARAMS.showLifeMonths,
+    showLifeYears:
+      search.get('lifeYears') !== null
+        ? search.get('lifeYears') === 'true'
+        : DEFAULT_PARAMS.showLifeYears
   };
 }
 
@@ -119,6 +129,8 @@ function setup() {
   params.viewMode = urlParams.viewMode;
   params.birthDate = urlParams.birthDate;
   params.lifeExpectancyYears = urlParams.lifeExpectancyYears;
+  params.showLifeMonths = urlParams.showLifeMonths;
+  params.showLifeYears = urlParams.showLifeYears;
 
   if (urlParams.showUI) {
     setupGui();
@@ -313,18 +325,10 @@ function getElapsedLifeFraction(now, birth, spanMs) {
   return Math.min(1, Math.max(0, elapsed / spanMs));
 }
 
-function countDaysInRange(start, end) {
-  const startDay = new Date(
-    start.getFullYear(),
-    start.getMonth(),
-    start.getDate()
-  ).getTime();
-  const endDay = new Date(
-    end.getFullYear(),
-    end.getMonth(),
-    end.getDate()
-  ).getTime();
-  return Math.max(1, Math.round((endDay - startDay) / 86400000));
+function addCalendarMonths(date, months) {
+  const out = new Date(date.getTime());
+  out.setMonth(out.getMonth() + months);
+  return out;
 }
 
 function drawLifeVisualization(now, x, y, w, h) {
@@ -379,41 +383,53 @@ function drawLifeTwelfthDivisions(now, birth, death, x, y, twelfthWidth, h) {
     const segEnd = new Date(
       birth.getTime() + ((i + 1) / 12) * (death.getTime() - birth.getTime())
     );
-    if (params.showWeeks) {
-      drawLifeWeekDivisions(segStart, segEnd, x + twelfthWidth * i, y, twelfthWidth, h);
+    const colX = x + twelfthWidth * i;
+    if (params.showLifeMonths) {
+      strokeWeight(params.borderWeight);
+      drawLifeMonthBoundaries(segStart, segEnd, colX, y, twelfthWidth, h);
     }
-    if (params.showDays) {
-      drawLifeDayDivisions(segStart, segEnd, x + twelfthWidth * i, y, twelfthWidth, h);
+    if (params.showLifeYears) {
+      strokeWeight(
+        params.showLifeMonths ? params.borderWeight + 1 : params.borderWeight
+      );
+      drawLifeYearBoundaries(segStart, segEnd, colX, y, twelfthWidth, h);
     }
   }
 }
 
-function drawLifeWeekDivisions(segStart, segEnd, monthX, y, monthWidth, h) {
-  strokeWeight(params.showDays ? params.borderWeight + 1 : params.borderWeight);
+function drawLifeMonthBoundaries(segStart, segEnd, monthX, y, monthWidth, h) {
   const span = segEnd.getTime() - segStart.getTime();
   if (span <= 0) return;
 
-  const d = new Date(segStart);
-  d.setHours(0, 0, 0, 0);
-  while (d < segEnd) {
-    if (d > segStart && d.getDay() === 0) {
-      const t = (d.getTime() - segStart.getTime()) / span;
-      const weekY = y + h * t;
-      line(monthX, weekY, monthX + monthWidth, weekY);
+  let boundary = new Date(segStart.getFullYear(), segStart.getMonth(), 1);
+  if (boundary.getTime() <= segStart.getTime()) {
+    boundary = addCalendarMonths(boundary, 1);
+  }
+  while (boundary < segEnd) {
+    if (boundary > segStart) {
+      const t = (boundary.getTime() - segStart.getTime()) / span;
+      const lineY = y + h * t;
+      line(monthX, lineY, monthX + monthWidth, lineY);
     }
-    d.setDate(d.getDate() + 1);
+    boundary = addCalendarMonths(boundary, 1);
   }
 }
 
-function drawLifeDayDivisions(segStart, segEnd, monthX, y, monthWidth, h) {
-  strokeWeight(params.borderWeight);
+function drawLifeYearBoundaries(segStart, segEnd, monthX, y, monthWidth, h) {
   const span = segEnd.getTime() - segStart.getTime();
   if (span <= 0) return;
 
-  const totalDays = countDaysInRange(segStart, segEnd);
-  for (let day = 1; day < totalDays; day++) {
-    const dayY = y + (h / totalDays) * day;
-    line(monthX, dayY, monthX + monthWidth, dayY);
+  let boundary = new Date(segStart.getFullYear(), 0, 1);
+  if (boundary.getTime() <= segStart.getTime()) {
+    boundary = new Date(segStart.getFullYear() + 1, 0, 1);
+  }
+  while (boundary < segEnd) {
+    if (boundary > segStart) {
+      const t = (boundary.getTime() - segStart.getTime()) / span;
+      const lineY = y + h * t;
+      line(monthX, lineY, monthX + monthWidth, lineY);
+    }
+    boundary = new Date(boundary.getFullYear() + 1, 0, 1);
   }
 }
 
@@ -443,22 +459,32 @@ function setupGui() {
 
   const generalFolder = pane.addFolder({ title: "General" });
   generalFolder.addInput(params, "rectangleSize", { min: 100, max: 1000, step: 1 });
-  generalFolder.addInput(params, "showWeeks", { label: 'Show Weeks' });
-  generalFolder.addInput(params, "showDays", { label: 'Show Days' });
 
-  const lifeFolder = pane.addFolder({ title: "Your life" });
-  lifeFolder.addInput(params, "viewMode", {
-    label: "View",
-    options: { Year: VIEW_MODES.YEAR, "Your life": VIEW_MODES.LIFE }
+  const viewTab = pane.addTab({
+    pages: [{ title: "Year" }, { title: "Your life" }]
   });
-  lifeFolder.addInput(params, "birthDate", { label: "Birth (YYYY-MM-DD)" });
-  lifeFolder.addInput(params, "lifeExpectancyYears", {
+
+  viewTab.pages[0].addInput(params, "showWeeks", { label: "Show weeks" });
+  viewTab.pages[0].addInput(params, "showDays", { label: "Show days" });
+
+  viewTab.pages[1].addInput(params, "birthDate", { label: "Birth (YYYY-MM-DD)" });
+  viewTab.pages[1].addInput(params, "lifeExpectancyYears", {
     label: "Lifetime (years)",
     min: 1,
     max: 120,
     step: 1
   });
-  
+  viewTab.pages[1].addInput(params, "showLifeMonths", { label: "Show months" });
+  viewTab.pages[1].addInput(params, "showLifeYears", { label: "Show years" });
+
+  viewTab.on("select", (ev) => {
+    params.viewMode =
+      ev.index === 0 ? VIEW_MODES.YEAR : VIEW_MODES.LIFE;
+  });
+
+  const lifePageIndex = params.viewMode === VIEW_MODES.LIFE ? 1 : 0;
+  viewTab.pages[lifePageIndex].selected = true;
+
   const colorsFolder = pane.addFolder({ title: "Colors" });
   colorsFolder.addInput(params, "backgroundColor", { label: 'Background Color' });
   colorsFolder.addInput(params, "fillColor", { label: 'Fill Color' });
